@@ -9,6 +9,7 @@ import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.file
 import dev.kobf.core.Obfuscator
 import dev.kobf.transforms.NoOpTransform
+import dev.kobf.transforms.RenameTransform
 import dev.kobf.transforms.StringEncryptTransform
 
 class Kobf : CliktCommand() {
@@ -26,7 +27,7 @@ class Kobf : CliktCommand() {
     private val verbose by option("-v", "--verbose", help = "Print details").flag()
 
     override fun run() {
-        val obfuscator = Obfuscator(listOf(NoOpTransform(), StringEncryptTransform()))
+        val obfuscator = Obfuscator(listOf(NoOpTransform(), StringEncryptTransform(), RenameTransform()))
         val result = obfuscator.run(input, output)
 
         echo("${input.name} -> ${output.name}")
