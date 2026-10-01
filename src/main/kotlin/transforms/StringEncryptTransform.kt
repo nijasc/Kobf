@@ -5,21 +5,8 @@ import dev.kobf.core.TransformContext
 import dev.kobf.core.Transformation
 import org.objectweb.asm.ClassWriter
 import org.objectweb.asm.Opcodes
-import org.objectweb.asm.tree.AbstractInsnNode
-import org.objectweb.asm.tree.FrameNode
-import org.objectweb.asm.tree.IincInsnNode
-import org.objectweb.asm.tree.InsnList
-import org.objectweb.asm.tree.InsnNode
-import org.objectweb.asm.tree.IntInsnNode
-import org.objectweb.asm.tree.JumpInsnNode
-import org.objectweb.asm.tree.LabelNode
-import org.objectweb.asm.tree.LdcInsnNode
-import org.objectweb.asm.tree.MethodInsnNode
-import org.objectweb.asm.tree.MethodNode
-import org.objectweb.asm.tree.TypeInsnNode
-import org.objectweb.asm.tree.VarInsnNode
-import org.objectweb.asm.tree.ClassNode
-import java.util.Random
+import org.objectweb.asm.tree.*
+import java.util.*
 
 class StringEncryptTransform(
     seed: Long? = null,
@@ -51,15 +38,21 @@ class StringEncryptTransform(
 
     private fun processClass(cn: ClassNode) {
         val methods = cn.methods.toList()
-        var touched = false
+        val hasStrings = methods.any { m ->
+            m.instructions?.toArray()?.any {
+                it is LdcInsnNode && it.cst is String && (it.cst as String).isNotEmpty()
+            } == true
+        }
+        if (!hasStrings) return
+
+        val existing = cn.methods.mapTo(HashSet()) { it.name + it.desc }
+        val decryptName = randomName(existing)
 
         for (method in methods) {
             val insns = method.instructions ?: continue
             val ldcs = insns.toArray().filterIsInstance<LdcInsnNode>()
                 .filter { it.cst is String && (it.cst as String).isNotEmpty() }
-
             if (ldcs.isEmpty()) continue
-            touched = true
 
             for (ldc in ldcs) {
                 val plain = ldc.cst as String
@@ -71,15 +64,24 @@ class StringEncryptTransform(
 
                 val call = InsnList().apply {
                     add(pushInt(emittedKey))
-                    add(MethodInsnNode(Opcodes.INVOKESTATIC, cn.name, DECRYPT_NAME, decryptDesc, false))
+                    add(MethodInsnNode(Opcodes.INVOKESTATIC, cn.name, decryptName, decryptDesc, false))
                 }
                 insns.insert(ldc, call)
                 encryptedCount++
             }
         }
 
-        if (touched && cn.methods.none { it.name == DECRYPT_NAME && it.desc == decryptDesc }) {
-            cn.methods.add(if (contextBound) buildContextDecrypt() else buildPlainDecrypt())
+        cn.methods.add(if (contextBound) buildContextDecrypt(decryptName) else buildPlainDecrypt(decryptName))
+    }
+
+    private fun randomName(existing: Set<String>): String {
+        val alphabet = "abcdefghijklmnopqrstuvwxyz"
+        while (true) {
+            val len = 6 + rng.nextInt(4)
+            val sb = StringBuilder(len)
+            repeat(len) { sb.append(alphabet[rng.nextInt(alphabet.length)]) }
+            val candidate = sb.toString()
+            if (candidate + decryptDesc !in existing) return candidate
         }
     }
 
@@ -102,10 +104,10 @@ class StringEncryptTransform(
         else -> LdcInsnNode(value)
     }
 
-    private fun buildPlainDecrypt(): MethodNode {
+    private fun buildPlainDecrypt(methodName: String): MethodNode {
         val m = MethodNode(
             Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC or Opcodes.ACC_SYNTHETIC,
-            DECRYPT_NAME, decryptDesc, null, null
+            methodName, decryptDesc, null, null
         )
         val l = m.instructions
         val loop = LabelNode()
@@ -164,10 +166,10 @@ class StringEncryptTransform(
         return m
     }
 
-    private fun buildContextDecrypt(): MethodNode {
+    private fun buildContextDecrypt(methodName: String): MethodNode {
         val m = MethodNode(
             Opcodes.ACC_PRIVATE or Opcodes.ACC_STATIC or Opcodes.ACC_SYNTHETIC,
-            DECRYPT_NAME, decryptDesc, null, null
+            methodName, decryptDesc, null, null
         )
         val l = m.instructions
         val loop = LabelNode()
@@ -179,7 +181,15 @@ class StringEncryptTransform(
         l.add(TypeInsnNode(Opcodes.NEW, "java/lang/Throwable"))
         l.add(InsnNode(Opcodes.DUP))
         l.add(MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/Throwable", "<init>", "()V", false))
-        l.add(MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/Throwable", "getStackTrace", "()[Ljava/lang/StackTraceElement;", false))
+        l.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/Throwable",
+                "getStackTrace",
+                "()[Ljava/lang/StackTraceElement;",
+                false
+            )
+        )
         l.add(InsnNode(Opcodes.ICONST_1))
         l.add(InsnNode(Opcodes.AALOAD))
         l.add(VarInsnNode(Opcodes.ASTORE, 6))
@@ -188,12 +198,52 @@ class StringEncryptTransform(
         l.add(InsnNode(Opcodes.DUP))
         l.add(MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "()V", false))
         l.add(VarInsnNode(Opcodes.ALOAD, 6))
-        l.add(MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StackTraceElement", "getClassName", "()Ljava/lang/String;", false))
-        l.add(MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false))
+        l.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StackTraceElement",
+                "getClassName",
+                "()Ljava/lang/String;",
+                false
+            )
+        )
+        l.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+                false
+            )
+        )
         l.add(VarInsnNode(Opcodes.ALOAD, 6))
-        l.add(MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StackTraceElement", "getMethodName", "()Ljava/lang/String;", false))
-        l.add(MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;", false))
-        l.add(MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;", false))
+        l.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StackTraceElement",
+                "getMethodName",
+                "()Ljava/lang/String;",
+                false
+            )
+        )
+        l.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "append",
+                "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+                false
+            )
+        )
+        l.add(
+            MethodInsnNode(
+                Opcodes.INVOKEVIRTUAL,
+                "java/lang/StringBuilder",
+                "toString",
+                "()Ljava/lang/String;",
+                false
+            )
+        )
         l.add(MethodInsnNode(Opcodes.INVOKEVIRTUAL, "java/lang/String", "hashCode", "()I", false))
         l.add(VarInsnNode(Opcodes.ILOAD, 1))
         l.add(InsnNode(Opcodes.IXOR))
@@ -247,9 +297,5 @@ class StringEncryptTransform(
         l.add(MethodInsnNode(Opcodes.INVOKESPECIAL, "java/lang/String", "<init>", "([C)V", false))
         l.add(InsnNode(Opcodes.ARETURN))
         return m
-    }
-
-    companion object {
-        private const val DECRYPT_NAME = "\$kobfDecrypt"
     }
 }

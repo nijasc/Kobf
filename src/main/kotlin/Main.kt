@@ -8,7 +8,6 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.file
 import dev.kobf.core.Obfuscator
-import dev.kobf.core.Transformation
 import dev.kobf.transforms.DebugStripTransform
 import dev.kobf.transforms.RenameTransform
 import dev.kobf.transforms.StringEncryptTransform
