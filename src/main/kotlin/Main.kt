@@ -8,8 +8,8 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.file
 import dev.kobf.core.Obfuscator
+import dev.kobf.core.Transformation
 import dev.kobf.transforms.DebugStripTransform
-import dev.kobf.transforms.NoOpTransform
 import dev.kobf.transforms.RenameTransform
 import dev.kobf.transforms.StringEncryptTransform
 
@@ -25,12 +25,24 @@ class Kobf : CliktCommand() {
     private val output by argument(help = "Output jar")
         .file(canBeDir = false)
 
+    private val noRename by option("--no-rename", help = "Disable name obfuscation").flag()
+
+    private val noStrings by option("--no-strings", help = "Disable string encryption").flag()
+
+    private val plainStrings by option("--plain-strings", help = "Do not bind the string key to the caller").flag()
+
+    private val keepDebug by option("--keep-debug", help = "Keep debug info (names, line numbers, source file)").flag()
+
     private val verbose by option("-v", "--verbose", help = "Print details").flag()
 
     override fun run() {
-        val obfuscator = Obfuscator(listOf(NoOpTransform(), StringEncryptTransform(), RenameTransform(),
-            DebugStripTransform()))
-        val result = obfuscator.run(input, output)
+        val transforms = buildList {
+            if (!keepDebug) add(DebugStripTransform())
+            if (!noRename) add(RenameTransform())
+            if (!noStrings) add(StringEncryptTransform(contextBound = !plainStrings))
+        }
+
+        val result = Obfuscator(transforms).run(input, output)
 
         echo("${input.name} -> ${output.name}")
         echo("Classes:    ${result.classCount}")
