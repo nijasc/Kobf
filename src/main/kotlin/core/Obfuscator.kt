@@ -13,6 +13,7 @@ class Obfuscator(private val transforms: List<Transformation>) {
     fun run(
         input: File,
         output: File,
+        classpath: List<File> = emptyList(),
         keep: (String, String?) -> Boolean = { _, _ -> false }
     ): ObfResult {
         val pool = ClassPool()
@@ -22,10 +23,11 @@ class Obfuscator(private val transforms: List<Transformation>) {
         for (t in transforms) t.apply(pool, ctx)
 
         val flags = transforms.fold(0) { acc, t -> acc or t.writerFlags }
+        val hierarchy = ClassHierarchy(pool, classpath)
 
         JarIo.write(output, pool) { name ->
             val node = pool.classes.getValue(name)
-            val writer = PoolClassWriter(flags, pool)
+            val writer = PoolClassWriter(flags, hierarchy)
             node.accept(writer)
             writer.toByteArray()
         }

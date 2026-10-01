@@ -4,15 +4,9 @@ import org.objectweb.asm.ClassWriter
 
 class PoolClassWriter(
     flags: Int,
-    private val pool: ClassPool
+    private val hierarchy: ClassHierarchy
 ) : ClassWriter(flags) {
 
-    override fun getCommonSuperClass(type1: String, type2: String): String {
-        return try {
-            super.getCommonSuperClass(type1, type2)
-        } catch (_: Throwable) {
-            if (pool.contains(type1) || pool.contains(type2)) "java/lang/Object"
-            else throw RuntimeException("Type cannot be resolved: $type1 / $type2")
-        }
-    }
+    override fun getCommonSuperClass(type1: String, type2: String): String =
+        hierarchy.commonSuperClass(type1, type2)
 }
